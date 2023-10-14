@@ -1,4 +1,4 @@
-# <img src="Content/Editor/FunctionIcon.svg" style="height:1.0em;" align="center"/> Neat Functions
+# <img src="Content/Editor/FunctionIcon.svg" height=40 width=40 align="center"/> Neat Functions
 Unreal Engine plugin that extends UFunctions in some neat ways. Functions that take delegates can have their events created in the function node itself, making them look like async actions.
 
 ## Example
