@@ -41,6 +41,7 @@ void MyFunctionWithParams(FMyDelegateParams Delegate)
 
 ### Multiple delegates
 You can even use _different_ delegate types with different parameters on the same function, unlike async actions.
+
 ![A node shoing two different execute pins, along with its parameters.](Documentation/Example_03.png)
 ```c++
 DECLARE_DYNAMIC_DELEGATE(FMyDelegate);
