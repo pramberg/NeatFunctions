@@ -148,3 +148,8 @@ FSlateIcon UK2Node_NeatCallFunction::GetIconAndTint(FLinearColor& OutColor) cons
 {
 	return FSlateIcon(FNeatFunctionsStyle::Get().GetStyleSetName(), "NeatFunctions.FunctionIcon");
 }
+
+bool UK2Node_NeatCallFunction::IsCompatibleWithGraph(UEdGraph const* Graph) const
+{
+	return Super::IsCompatibleWithGraph(Graph) && GetDefault<UK2Node_CustomEvent>()->IsCompatibleWithGraph(Graph);
+}
