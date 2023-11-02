@@ -115,7 +115,7 @@ void UK2Node_NeatCallFunction::ExpandNode(FKismetCompilerContext& CompilerContex
 		if (!IsDelegateEligable(Prop))
 			continue;
 		
-		const UK2Node_CustomEvent* EventNode = UK2Node_CustomEvent::CreateFromFunction(FVector2D::ZeroVector, SourceGraph, FString::Printf(TEXT("%s_GeneratedEvent"), *Prop->GetName()), Prop->SignatureFunction);
+		const UK2Node_CustomEvent* EventNode = UK2Node_CustomEvent::CreateFromFunction(FVector2D::ZeroVector, SourceGraph, FString::Printf(TEXT("%s_%s"), *Prop->GetName(), *CompilerContext.GetGuid(this)), Prop->SignatureFunction);
 
 		UEdGraphPin* DelegatePin = EventNode->FindPin(UK2Node_Event::DelegateOutputName);
 		UEdGraphPin* DelegateInputPin = CallFunc->FindPin(Prop->GetFName(), EGPD_Input);
