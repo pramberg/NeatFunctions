@@ -7,6 +7,9 @@
 #include "KismetCompiler.h"
 
 #include "K2Node_CustomEvent.h"
+#include "SGraphPin.h"
+#include "KismetNodes/SGraphNodeK2Default.h"
+#include "Widgets/Colors/SSimpleGradient.h"
 
 const FName UK2Node_NeatCallFunction::DelegateFunctionMetadataName("NeatDelegateFunction");
 
@@ -155,4 +158,47 @@ void UK2Node_NeatCallFunction::ValidateNodeDuringCompilation(FCompilerResultsLog
 FSlateIcon UK2Node_NeatCallFunction::GetIconAndTint(FLinearColor& OutColor) const
 {
 	return FSlateIcon(FNeatFunctionsStyle::Get().GetStyleSetName(), "NeatFunctions.FunctionIcon");
+}
+
+class SNeatCallFunctionNode : public SGraphNodeK2Default
+{
+public:
+	SLATE_BEGIN_ARGS(SNeatCallFunctionNode){}
+	SLATE_END_ARGS()
+	
+	void Construct(const FArguments& InArgs, UK2Node* InNode)
+	{
+		this->GraphNode = InNode;
+		this->UpdateGraphNode();
+	}
+
+	virtual void AddPin(const TSharedRef<SGraphPin>& PinToAdd) override
+	{
+		// Add separator on top of each delegate, to make it very clear what pins belong to what context.
+		const UK2Node_NeatCallFunction* NodeAsFn = Cast<UK2Node_NeatCallFunction>(GetNodeObj());
+		const UEdGraphPin* PinObj = PinToAdd->GetPinObj();
+		
+		const UFunction* Fn = NodeAsFn ? NodeAsFn->GetTargetFunction() : nullptr;
+		const FProperty* Property = Fn ? Fn->FindPropertyByName(PinObj->PinName) : nullptr;
+		const bool bIsDelegatePin = Property && Property->IsA<FDelegateProperty>();
+		if (PinToAdd->GetDirection() == EGPD_Output && PinObj->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec && bIsDelegatePin)
+		{
+			RightNodeBox->AddSlot().AutoHeight().Padding(5.0f)
+			[
+				SNew(SBox).MinDesiredHeight(2.0f)
+				[
+					SNew(SSimpleGradient)
+					.StartColor(FLinearColor::Transparent)
+					.EndColor(FLinearColor::White)
+				]
+			];
+		}
+		
+		SGraphNodeK2Default::AddPin(PinToAdd);
+	}
+};
+
+TSharedPtr<SGraphNode> UK2Node_NeatCallFunction::CreateVisualWidget()
+{
+	return SNew(SNeatCallFunctionNode, this);
 }

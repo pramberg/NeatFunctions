@@ -22,6 +22,7 @@ public class NeatFunctions : ModuleRules
 			"UnrealEd",
 			"KismetCompiler",
 			"Projects",
+			"GraphEditor",
 		});
 	}
 }
