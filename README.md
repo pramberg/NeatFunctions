@@ -4,22 +4,14 @@ Unreal Engine plugin that extends UFunctions in some neat ways. Functions that t
 ## Examples
 
 ### Simple
-This is a simple example of what this plugin does, with the code used to create the nodes below. Note that by default the original function node will still be available. You have to explicitly remove the regular node if you want that, using the `BlueprintInternalUseOnly` metadata, as shown in `MyFunction2`.
+This is a simple example of what this plugin does, with the code used to create the nodes below. The `Original function` to the left is what Unreal typically generates without this plugin. The `Neat function` to the right is what this plugin generates.
 
 ![An example of this plugin, showing three nodes, two of which are created by this plugin.](Documentation/Example_01.png)
 ```c++
 DECLARE_DYNAMIC_DELEGATE(FMyDelegate);
 
-// This will show both the original function and the Neat version in the BP context menu
 UFUNCTION(BlueprintCallable, meta = (NeatDelegateFunction))
 void MyFunction(FMyDelegate Delegate)
-{
-	Delegate.ExecuteIfBound();
-}
-
-// This will show *only* the Neat version in the BP context menu
-UFUNCTION(BlueprintCallable, meta = (NeatDelegateFunction, BlueprintInternalUseOnly = true))
-void MyFunction2(FMyDelegate Delegate)
 {
 	Delegate.ExecuteIfBound();
 }
@@ -32,7 +24,7 @@ More complex delegate types are supported, so you can also use delegates with pa
 ```c++
 DECLARE_DYNAMIC_DELEGATE_TwoParams(FMyDelegateParams, float, FloatValue, int32, IntValue);
 
-UFUNCTION(BlueprintCallable, meta = (NeatDelegateFunction, BlueprintInternalUseOnly = true))
+UFUNCTION(BlueprintCallable, meta = (NeatDelegateFunction))
 void MyFunctionWithParams(FMyDelegateParams Delegate)
 {
     Delegate.ExecuteIfBound(42.0f, 42);
@@ -47,7 +39,7 @@ You can even use _different_ delegate types with different parameters on the sam
 DECLARE_DYNAMIC_DELEGATE(FMyDelegate);
 DECLARE_DYNAMIC_DELEGATE_TwoParams(FMyDelegateParams, float, FloatValue, int32, IntValue);
 
-UFUNCTION(BlueprintCallable, meta = (NeatDelegateFunction, BlueprintInternalUseOnly = true))
+UFUNCTION(BlueprintCallable, meta = (NeatDelegateFunction))
 void MyFunctionMultipleDelegates(FMyDelegate Delegate, FMyDelegateParams DelegateParams)
 {
     Delegate.ExecuteIfBound();
