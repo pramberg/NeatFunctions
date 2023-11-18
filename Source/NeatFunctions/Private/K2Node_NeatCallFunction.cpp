@@ -40,23 +40,6 @@ void UK2Node_NeatCallFunction::GetMenuActions(FBlueprintActionDatabaseRegistrar&
 	}
 }
 
-namespace
-{
-	bool IsDelegateEligable(const FDelegateProperty* InProp)
-	{
-		const bool bHasReturnValue = InProp->SignatureFunction->GetReturnProperty() != nullptr;
-
-		bool bHasOutParam = false;
-		for (TFieldIterator<FProperty> PropIt(InProp->SignatureFunction); PropIt && (PropIt->PropertyFlags & CPF_Parm); ++PropIt)
-		{
-			const FProperty* Param = *PropIt;
-			bHasOutParam &= Param->HasAnyPropertyFlags(CPF_OutParm);
-		}
-		
-		return !bHasReturnValue && !bHasOutParam;
-	}
-}
-
 void UK2Node_NeatCallFunction::AllocateDefaultPins()
 {
 	Super::AllocateDefaultPins();
@@ -65,35 +48,38 @@ void UK2Node_NeatCallFunction::AllocateDefaultPins()
 	bIsNeatFunction = GetDefault<UK2Node_CustomEvent>()->IsCompatibleWithGraph(GetGraph());
 	if (!bIsNeatFunction)
 		return;
-	
-	const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
-	
-	for (const FDelegateProperty* Prop : TFieldRange<FDelegateProperty>(GetTargetFunction()))
+
+	// Remove all delegate input pins that can be handled by this node (since they will be converted to output Exec pins).
+	// Need to do this first to ensure the index of pins are stable in the next loop.
+	ForEachEligableDelegateProperty([&](const FDelegateProperty& Prop)
 	{
-		if (!IsDelegateEligable(Prop))
-			continue;
-		
-		if (UEdGraphPin* DelPin = FindPin(Prop->GetFName()))
+		if (UEdGraphPin* DelPin = FindPin(Prop.GetFName()))
 			RemovePin(DelPin);
+	});
+
+	const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+	ForEachEligableDelegateProperty([&](const FDelegateProperty& Prop)
+	{
+		UEdGraphPin* ExecPin = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Exec, Prop.GetFName());
+		ExecPin->PinToolTip = Prop.GetToolTipText().ToString();
+		ExecPin->PinFriendlyName = Prop.GetDisplayNameText();
+		ExecPin->SourceIndex = GetPinIndex(ExecPin);
 		
-		UEdGraphPin* ExecPin = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Exec, Prop->GetFName());
-		ExecPin->PinToolTip = Prop->GetToolTipText().ToString();
-		ExecPin->PinFriendlyName = Prop->GetDisplayNameText();
-		
-		for (TFieldIterator<FProperty> PropIt(Prop->SignatureFunction); PropIt && (PropIt->PropertyFlags & CPF_Parm); ++PropIt)
+		for (TFieldIterator<FProperty> PropIt(Prop.SignatureFunction); PropIt && (PropIt->PropertyFlags & CPF_Parm); ++PropIt)
 		{
 			const FProperty* Param = *PropIt;
 			const bool bIsFunctionInput = !Param->HasAnyPropertyFlags(CPF_OutParm) || Param->HasAnyPropertyFlags(CPF_ReferenceParm);
 			if (bIsFunctionInput)
 			{
-				UEdGraphPin* Pin = CreatePin(EGPD_Output, NAME_None, FName(FString::Printf(TEXT("%s_%s"), *Prop->GetName(), *Param->GetName())));
+				UEdGraphPin* Pin = CreatePin(EGPD_Output, NAME_None, FName(FString::Printf(TEXT("%s_%s"), *Prop.GetName(), *Param->GetName())));
 				K2Schema->ConvertPropertyToPinType(Param, /*out*/ Pin->PinType);
 				Pin->PinFriendlyName = Param->GetDisplayNameText();
+				Pin->SourceIndex = ExecPin->SourceIndex;
 
-				GeneratePinTooltipFromFunction(*Pin, Prop->SignatureFunction);
+				GeneratePinTooltipFromFunction(*Pin, Prop.SignatureFunction);
 			}
 		}
-	}
+	});
 }
 
 void UK2Node_NeatCallFunction::ExpandNode(FKismetCompilerContext& CompilerContext, UEdGraph* SourceGraph)
@@ -121,33 +107,54 @@ void UK2Node_NeatCallFunction::ExpandNode(FKismetCompilerContext& CompilerContex
 		}
 	}
 
-	for (const FDelegateProperty* Prop : TFieldRange<FDelegateProperty>(GetTargetFunction()))
+	ForEachEligableDelegateProperty([&](const FDelegateProperty& Prop)
 	{
-		if (!IsDelegateEligable(Prop))
-			continue;
-		
-		const UK2Node_CustomEvent* EventNode = UK2Node_CustomEvent::CreateFromFunction(FVector2D::ZeroVector, SourceGraph, FString::Printf(TEXT("%s_%s"), *Prop->GetName(), *CompilerContext.GetGuid(this)), Prop->SignatureFunction);
+		const UK2Node_CustomEvent* EventNode = UK2Node_CustomEvent::CreateFromFunction(FVector2D::ZeroVector, SourceGraph, FString::Printf(TEXT("%s_%s"), *Prop.GetName(), *CompilerContext.GetGuid(this)), Prop.SignatureFunction);
 
 		UEdGraphPin* DelegatePin = EventNode->FindPin(UK2Node_Event::DelegateOutputName);
-		UEdGraphPin* DelegateInputPin = CallFunc->FindPin(Prop->GetFName(), EGPD_Input);
+		UEdGraphPin* DelegateInputPin = CallFunc->FindPin(Prop.GetFName(), EGPD_Input);
 		Schema->TryCreateConnection(DelegatePin, DelegateInputPin);
 
 		UEdGraphPin* EventThenPin = EventNode->GetThenPin();
-		UEdGraphPin* ThenPinForCurrentDelegate = FindPin(Prop->GetFName());
+		UEdGraphPin* ThenPinForCurrentDelegate = FindPin(Prop.GetFName());
 		bIsValid &= CompilerContext.MovePinLinksToIntermediate(*ThenPinForCurrentDelegate, *EventThenPin).CanSafeConnect();
 
-		for (TFieldIterator<FProperty> PropIt(Prop->SignatureFunction); PropIt && (PropIt->PropertyFlags & CPF_Parm); ++PropIt)
+		for (TFieldIterator<FProperty> PropIt(Prop.SignatureFunction); PropIt && (PropIt->PropertyFlags & CPF_Parm); ++PropIt)
 		{
 			const FProperty* Param = *PropIt;
 			const bool bIsFunctionInput = !Param->HasAnyPropertyFlags(CPF_OutParm) || Param->HasAnyPropertyFlags(CPF_ReferenceParm);
 			if (bIsFunctionInput)
 			{
-				bIsValid &= CompilerContext.MovePinLinksToIntermediate(*FindPin(FName(FString::Printf(TEXT("%s_%s"), *Prop->GetName(), *Param->GetName()))), *EventNode->FindPin(Param->GetFName())).CanSafeConnect();
+				bIsValid &= CompilerContext.MovePinLinksToIntermediate(*FindPin(FName(FString::Printf(TEXT("%s_%s"), *Prop.GetName(), *Param->GetName()))), *EventNode->FindPin(Param->GetFName())).CanSafeConnect();
 			}
 		}
-	}
+	});
 
 	BreakAllNodeLinks();
+}
+
+void UK2Node_NeatCallFunction::PinConnectionListChanged(UEdGraphPin* Pin)
+{
+	Super::PinConnectionListChanged(Pin);
+
+	// Attempt to perform a more accurate "Autowire", where we link to a specific delegate's Then pin.
+	// We store the index of a data pin's delegate pin in the SourceIndex property, for quick and easy lookups.
+	
+	if (Pin->SourceIndex == INDEX_NONE || Pin->LinkedTo.Num() != 1)
+		return;
+
+	const UEdGraphPin* OtherPin = Pin->LinkedTo[0];
+	UEdGraphNode* OtherNode = OtherPin->GetOwningNode();
+
+	QueueDestroyAutomaticExecConnection(OtherNode);
+
+	UEdGraphPin* ThenPin = Pins[Pin->SourceIndex];
+	if (ThenPin->HasAnyConnections())
+		return;
+
+	const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
+	if (UEdGraphPin* ExecPin = OtherNode->FindPin(UEdGraphSchema_K2::PN_Execute, EGPD_Input))
+		K2Schema->TryCreateConnection(ThenPin, ExecPin);
 }
 
 void UK2Node_NeatCallFunction::ValidateNodeDuringCompilation(FCompilerResultsLog& MessageLog) const
@@ -201,4 +208,43 @@ public:
 TSharedPtr<SGraphNode> UK2Node_NeatCallFunction::CreateVisualWidget()
 {
 	return SNew(SNeatCallFunctionNode, this);
+}
+
+namespace
+{
+	bool IsDelegateEligable(const FDelegateProperty* InProp)
+	{
+		const bool bHasReturnValue = InProp->SignatureFunction->GetReturnProperty() != nullptr;
+
+		bool bHasOutParam = false;
+		for (TFieldIterator<FProperty> PropIt(InProp->SignatureFunction); PropIt && (PropIt->PropertyFlags & CPF_Parm); ++PropIt)
+		{
+			const FProperty* Param = *PropIt;
+			bHasOutParam &= Param->HasAnyPropertyFlags(CPF_OutParm);
+		}
+		
+		return !bHasReturnValue && !bHasOutParam;
+	}
+}
+
+
+void UK2Node_NeatCallFunction::ForEachEligableDelegateProperty(FForEachDelegateFunction InFn)
+{
+	for (const FDelegateProperty* Prop : TFieldRange<FDelegateProperty>(GetTargetFunction()))
+	{
+		if (Prop && IsDelegateEligable(Prop))
+			InFn(*Prop);
+	}
+}
+
+void UK2Node_NeatCallFunction::QueueDestroyAutomaticExecConnection(TWeakObjectPtr<UEdGraphNode> OtherNode)
+{
+	GEditor->GetTimerManager()->SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this, OtherNode]()
+	{
+		const UEdGraphNode* StrongOtherNode = OtherNode.Get();
+		if (UEdGraphPin* ExecPin = StrongOtherNode ? StrongOtherNode->FindPin(UEdGraphSchema_K2::PN_Execute, EGPD_Input) : nullptr)
+		{
+			ExecPin->BreakLinkTo(GetThenPin());
+		}
+	}));
 }
