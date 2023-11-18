@@ -57,6 +57,11 @@ namespace
 void UK2Node_NeatCallFunction::AllocateDefaultPins()
 {
 	Super::AllocateDefaultPins();
+
+	// This should always be called. Otherwise it might have an invalid cached value (if copying from event graph to function graph, for example)
+	bIsNeatFunction = GetDefault<UK2Node_CustomEvent>()->IsCompatibleWithGraph(GetGraph());
+	if (!bIsNeatFunction)
+		return;
 	
 	const UEdGraphSchema_K2* K2Schema = GetDefault<UEdGraphSchema_K2>();
 	
@@ -91,6 +96,9 @@ void UK2Node_NeatCallFunction::AllocateDefaultPins()
 void UK2Node_NeatCallFunction::ExpandNode(FKismetCompilerContext& CompilerContext, UEdGraph* SourceGraph)
 {
 	Super::ExpandNode(CompilerContext, SourceGraph);
+
+	if (!bIsNeatFunction)
+		return;
 	
 	const UEdGraphSchema_K2* Schema = CompilerContext.GetSchema();
 	
@@ -147,9 +155,4 @@ void UK2Node_NeatCallFunction::ValidateNodeDuringCompilation(FCompilerResultsLog
 FSlateIcon UK2Node_NeatCallFunction::GetIconAndTint(FLinearColor& OutColor) const
 {
 	return FSlateIcon(FNeatFunctionsStyle::Get().GetStyleSetName(), "NeatFunctions.FunctionIcon");
-}
-
-bool UK2Node_NeatCallFunction::IsCompatibleWithGraph(UEdGraph const* Graph) const
-{
-	return Super::IsCompatibleWithGraph(Graph) && GetDefault<UK2Node_CustomEvent>()->IsCompatibleWithGraph(Graph);
 }
