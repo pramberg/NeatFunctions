@@ -176,6 +176,7 @@ public:
 	void Construct(const FArguments& InArgs, UK2Node* InNode)
 	{
 		this->GraphNode = InNode;
+		this->SetCursor(EMouseCursor::CardinalCross);
 		this->UpdateGraphNode();
 	}
 
