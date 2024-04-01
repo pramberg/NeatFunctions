@@ -18,6 +18,11 @@
 			"Name": "NeatFunctions",
 			"Type": "UncookedOnly",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "NeatFunctionsRuntime",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	]
 }

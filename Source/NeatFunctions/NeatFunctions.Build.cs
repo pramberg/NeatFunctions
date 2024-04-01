@@ -11,6 +11,7 @@ public class NeatFunctions : ModuleRules
 		{
 			"Core",
 			"BlueprintGraph",
+			"NeatFunctionsRuntime",
 		});
 		
 		PrivateDependencyModuleNames.AddRange(new string[]
@@ -20,6 +21,7 @@ public class NeatFunctions : ModuleRules
 			"SlateCore",
 			"Slate",
 			"UnrealEd",
+			"Kismet",
 			"KismetCompiler",
 			"Projects",
 			"GraphEditor",
