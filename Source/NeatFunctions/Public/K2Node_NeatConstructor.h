@@ -32,6 +32,7 @@ public:
 	virtual FText GetNodeTitleFormat() const override;
 
 	virtual FText GetTooltipText() const override;
+	virtual FText GetMenuCategory() const override;
 
 	virtual FSlateIcon GetIconAndTint(FLinearColor& OutColor) const override;
 

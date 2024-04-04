@@ -10,11 +10,106 @@
 #include "K2Node_EnumLiteral.h"
 #include "K2Node_IfThenElse.h"
 #include "KismetCompiler.h"
-#include "NeatFunctionsStyle.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "NeatFunctionsRuntime/Public/NeatFunctionsStatics.h"
 #include "Styling/SlateIconFinder.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogNeatFunctions, Log, All);
+
+namespace
+{
+	const UClass* GetClassParameterMetaClass(const UFunction& InFunction)
+	{
+		const FClassProperty* ClassProp = CastField<FClassProperty>(InFunction.FindPropertyByName(NAME_Class));
+		return ClassProp ? ClassProp->MetaClass : nullptr;
+	}
+
+	bool HasValidReturnValue(const UFunction& InFunction)
+	{
+		const FObjectProperty* ReturnProperty = CastField<FObjectProperty>(InFunction.GetReturnProperty());
+		return ReturnProperty ?  GetClassParameterMetaClass(InFunction)->IsChildOf(ReturnProperty->PropertyClass) : false;
+	}
+
+	const FObjectProperty* GetFinishFunctionObjectProperty(const UFunction& InFunction, const UClass& SpawnClassParameter)
+	{
+		for (TFieldIterator<FProperty> PropIt(&InFunction); PropIt && (PropIt->PropertyFlags & CPF_Parm); ++PropIt)
+		{
+			FProperty* Param = *PropIt;
+			const bool bIsFunctionInput = !Param->HasAnyPropertyFlags(CPF_ReturnParm) && (!Param->HasAnyPropertyFlags(CPF_OutParm) || Param->HasAnyPropertyFlags(CPF_ReferenceParm));
+			if (!bIsFunctionInput)
+				continue;
+
+			const FObjectProperty* ObjectProp = CastField<FObjectProperty>(Param);
+			if (!ObjectProp)
+				continue;
+
+			if (SpawnClassParameter.IsChildOf(ObjectProp->PropertyClass))
+			{
+				return ObjectProp;
+			}
+		}
+
+		return nullptr;
+	}
+
+	bool HasValidFinishFunction(const UFunction& InFunction, FString& OutError)
+	{
+		const FString* FinishFuncName = InFunction.FindMetaData(UK2Node_NeatConstructor::NeatConstructorFinishMetadataName);
+		if (!FinishFuncName)
+			return true;
+
+		const UFunction* FinishFunction = InFunction.GetOwnerClass()->FindFunctionByName(FName(*FinishFuncName));
+		if (FinishFunction == nullptr)
+		{
+			OutError = FString::Printf(TEXT("Cannot find function called %s in class %s."), **FinishFuncName, *GetNameSafe(InFunction.GetOwnerClass()));
+			return false;
+		}
+
+		const FObjectProperty* ReturnProperty = CastField<FObjectProperty>(InFunction.GetReturnProperty());
+		const FObjectProperty* Prop = GetFinishFunctionObjectProperty(*FinishFunction, *ReturnProperty->PropertyClass);
+		if (!Prop)
+		{
+			OutError = FString::Printf(TEXT("%s does not have a valid input. Must have an input that the spawned object can be converted to."), **FinishFuncName);
+			return false;
+		}
+		
+		return true;
+	}
+
+	bool ValidateFunction(const UFunction* InFunction)
+	{
+		if (!InFunction)
+			return false;
+
+		const UFunction& Fn = *InFunction;
+
+		const bool bHasAnyMetadata = Fn.HasMetaData(UK2Node_NeatConstructor::NeatConstructorMetadataName) || Fn.HasMetaData(UK2Node_NeatConstructor::NeatConstructorFinishMetadataName);
+		if (!bHasAnyMetadata)
+			return false;
+
+		if (!GetClassParameterMetaClass(Fn))
+		{
+			UE_LOG(LogNeatFunctions, Error, TEXT("Cannot create NeatConstructor for %s. Function does not have a parameter named \"Class\". This parameter must be of `TSubclassOf<SomeType>`"), *GetNameSafe(&Fn))
+			return false;
+		}
+
+		if (!HasValidReturnValue(Fn))
+		{
+			UE_LOG(LogNeatFunctions, Error, TEXT("Cannot create NeatConstructor for %s. Function does not have a valid return value. Must return an object of the same class as the \"Class\" parameter."), *GetNameSafe(&Fn))
+			return false;
+		}
+
+		FString Error;
+		if (!HasValidFinishFunction(Fn, Error))
+		{
+			UE_LOG(LogNeatFunctions, Error, TEXT("Cannot create NeatConstructor for %s. Function does not have a valid finish function. %s"), *GetNameSafe(&Fn), *Error);
+			return false;
+		}
+		
+		return true;
+	}
+}
 
 void UK2Node_NeatConstructor::GetMenuActions(FBlueprintActionDatabaseRegistrar& ActionRegistrar) const
 {
@@ -23,8 +118,7 @@ void UK2Node_NeatConstructor::GetMenuActions(FBlueprintActionDatabaseRegistrar& 
 	{
 		for (const UFunction* Fn : TObjectRange<UFunction>())
 		{
-			const bool bNeatSpawnActorFunction = Fn ? Fn->HasMetaData(NeatConstructorMetadataName) || Fn->HasMetaData(NeatConstructorFinishMetadataName) : false;
-			if (!bNeatSpawnActorFunction)
+			if (!ValidateFunction(Fn))
 				continue;
 
 			UBlueprintFieldNodeSpawner* NodeSpawner = UBlueprintFieldNodeSpawner::Create(NodeClass, Fn);
@@ -35,7 +129,7 @@ void UK2Node_NeatConstructor::GetMenuActions(FBlueprintActionDatabaseRegistrar& 
 			NodeSpawner->DefaultMenuSignature.Tooltip = FText::FromString(UK2Node_CallFunction::GetDefaultTooltipForFunction(Fn));
 			NodeSpawner->DefaultMenuSignature.Keywords = UK2Node_CallFunction::GetKeywordsForFunction(Fn);
 
-			NodeSpawner->DefaultMenuSignature.Icon = FSlateIcon(FNeatFunctionsStyle::Get().GetStyleSetName(), "NeatFunctions.FunctionIcon");
+			NodeSpawner->DefaultMenuSignature.Icon = FSlateIconFinder::FindIconForClass(GetClassParameterMetaClass(*Fn));
 			NodeSpawner->DefaultMenuSignature.IconTint = FLinearColor::White;
 			NodeSpawner->CustomizeNodeDelegate.BindLambda([Fn](UEdGraphNode* Node, bool)
 			{
@@ -240,7 +334,7 @@ void UK2Node_NeatConstructor::ExpandNode(FKismetCompilerContext& CompilerContext
 	BeginSpawnFunc->PinTypeChanged(BeginSpawnFunc->GetReturnValuePin());
 
 	CompilerContext.MovePinLinksToIntermediate(*GetExecPin(), *BeginSpawnFunc->GetExecPin());
-	CompilerContext.MovePinLinksToIntermediate(*GetClassPin(), *BeginSpawnFunc->FindPin(FName("Class")));
+	CompilerContext.MovePinLinksToIntermediate(*GetClassPin(), *BeginSpawnFunc->FindPin(NAME_Class));
 	CompilerContext.MovePinLinksToIntermediate(*GetResultPin(), *BeginSpawnFunc->GetReturnValuePin());
 
 	for (UEdGraphPin* CurrentPin : Pins)
@@ -310,7 +404,7 @@ UClass* UK2Node_NeatConstructor::GetClassPinBaseClass() const
 {
 	if (UFunction* Fn = GetTargetFunction())
 	{
-		const FClassProperty* ClassProp = CastField<FClassProperty>(Fn->FindPropertyByName("Class"));
+		const FClassProperty* ClassProp = CastField<FClassProperty>(Fn->FindPropertyByName(NAME_Class));
 		if (!ClassProp)
 			return nullptr;
 
@@ -373,6 +467,15 @@ FText UK2Node_NeatConstructor::GetNodeTitleFormat() const
 FText UK2Node_NeatConstructor::GetTooltipText() const
 {
 	return FText::FromString(UK2Node_CallFunction::GetDefaultTooltipForFunction(GetTargetFunction()));
+}
+
+FText UK2Node_NeatConstructor::GetMenuCategory() const
+{
+	if (const UFunction* TargetFunction = GetTargetFunction())
+	{
+		return UK2Node_CallFunction::GetDefaultCategoryForFunction(TargetFunction, FText::GetEmpty());
+	}
+	return FText::GetEmpty();
 }
 
 FSlateIcon UK2Node_NeatConstructor::GetIconAndTint(FLinearColor& OutColor) const
@@ -510,7 +613,7 @@ UFunction* UK2Node_NeatConstructor::GetFinishFunction() const
 	if (UFunction* FinishFunc = FinishFuncName ? TargetFunc->GetOwnerClass()->FindFunctionByName(FName(*FinishFuncName)) : nullptr)
 		return FinishFunc;
 
-	const FClassProperty* TargetFuncClass = CastField<FClassProperty>(TargetFunc->FindPropertyByName("Class"));
+	const FClassProperty* TargetFuncClass = CastField<FClassProperty>(TargetFunc->FindPropertyByName(NAME_Class));
 	if (!TargetFuncClass)
 		return nullptr;
 
@@ -524,22 +627,8 @@ FName UK2Node_NeatConstructor::GetFinishFunctionObjectInputName() const
 	const UClass* PinBase = GetClassPinBaseClass();
 	if (const UFunction* Fn = GetFinishFunction())
 	{
-		for (TFieldIterator<FProperty> PropIt(Fn); PropIt && (PropIt->PropertyFlags & CPF_Parm); ++PropIt)
-		{
-			FProperty* Param = *PropIt;
-			const bool bIsFunctionInput = !Param->HasAnyPropertyFlags(CPF_ReturnParm) && (!Param->HasAnyPropertyFlags(CPF_OutParm) || Param->HasAnyPropertyFlags(CPF_ReferenceParm));
-			if (!bIsFunctionInput)
-				continue;
-
-			const FObjectProperty* ObjectProp = CastField<FObjectProperty>(Param);
-			if (!ObjectProp)
-				continue;
-
-			if (PinBase->IsChildOf(ObjectProp->PropertyClass))
-			{
-				return ObjectProp->GetFName();
-			}
-		}
+		const FObjectProperty* Prop = GetFinishFunctionObjectProperty(*Fn, *PinBase);
+		return Prop ? Prop->GetFName() : NAME_None;
 	}
 
 	return NAME_None;
