@@ -25,6 +25,8 @@ public:
 
 	virtual UClass* GetClassPinBaseClass() const override;
 	
+	virtual void CreatePinsForClass(UClass* InClass, TArray<UEdGraphPin*>* OutClassPins) override;
+	
 	virtual bool IsSpawnVarPin(UEdGraphPin* Pin) const override;
 
 	virtual FText GetBaseNodeTitle() const override;
@@ -35,6 +37,8 @@ public:
 	virtual FText GetMenuCategory() const override;
 
 	virtual FSlateIcon GetIconAndTint(FLinearColor& OutColor) const override;
+	
+	virtual void EarlyValidation(FCompilerResultsLog& MessageLog) const override;
 
 	void CreatePinsForFunction(const UFunction* InFunction);
 	

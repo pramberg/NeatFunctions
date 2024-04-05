@@ -145,7 +145,7 @@ void UK2Node_NeatConstructor::GetMenuActions(FBlueprintActionDatabaseRegistrar& 
 void UK2Node_NeatConstructor::AllocateDefaultPins()
 {
 	Super::AllocateDefaultPins();
-
+	
 	FCreatePinParams Params;
 	Params.Index = GetPinIndex(GetThenPin()) + 1;
 	UEdGraphPin* ThenIsNotValid = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Exec, UEdGraphSchema_K2::PN_Else, Params);
@@ -414,6 +414,32 @@ UClass* UK2Node_NeatConstructor::GetClassPinBaseClass() const
 	return AActor::StaticClass();
 }
 
+void UK2Node_NeatConstructor::CreatePinsForClass(UClass* InClass, TArray<UEdGraphPin*>* OutClassPins)
+{
+	TArray<UEdGraphPin*> CreatedPins;
+	Super::CreatePinsForClass(InClass, &CreatedPins);
+
+	const FString& IgnorePropertyListStr = GetTargetFunction()->GetMetaData(FName(TEXT("HideSpawnParms")));
+	if (!IgnorePropertyListStr.IsEmpty())
+	{
+		TArray<FString> IgnorePropertyList;
+		IgnorePropertyListStr.ParseIntoArray(IgnorePropertyList, TEXT(","), true);
+
+		for (UEdGraphPin* Pin : CreatedPins)
+		{
+			const int32 Index = IgnorePropertyList.IndexOfByKey(Pin->GetName());
+			if (Index != INDEX_NONE)
+			{
+				RemovePin(Pin);
+				IgnorePropertyList.RemoveAtSwap(Index);
+			}
+		}
+	}
+
+	if (OutClassPins)
+		OutClassPins->Append(MoveTemp(CreatedPins));
+}
+
 bool UK2Node_NeatConstructor::IsSpawnVarPin(UEdGraphPin* Pin) const
 {
 	for (TFieldIterator<FProperty> PropIt(GetTargetFunction()); PropIt && (PropIt->PropertyFlags & CPF_Parm); ++PropIt)
@@ -481,6 +507,17 @@ FText UK2Node_NeatConstructor::GetMenuCategory() const
 FSlateIcon UK2Node_NeatConstructor::GetIconAndTint(FLinearColor& OutColor) const
 {
 	return FSlateIconFinder::FindIconForClass(GetClassPinBaseClass());
+}
+
+void UK2Node_NeatConstructor::EarlyValidation(FCompilerResultsLog& MessageLog) const
+{
+	Super::EarlyValidation(MessageLog);
+	
+	const UClass* ClassToSpawn = GetClassToSpawn();
+	if (!ClassToSpawn)
+		MessageLog.Error(TEXT("Must specify a class in @@"), this);
+	else if (ClassToSpawn->HasAnyClassFlags(CLASS_Abstract))
+		MessageLog.Error(TEXT("Cannot construct an abstract object of type '@@' in @@"), *GetNameSafe(ClassToSpawn), this);
 }
 
 void UK2Node_NeatConstructor::CreatePinsForFunction(const UFunction* InFunction)
