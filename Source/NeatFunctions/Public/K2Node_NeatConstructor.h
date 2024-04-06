@@ -40,6 +40,9 @@ public:
 	
 	virtual void EarlyValidation(FCompilerResultsLog& MessageLog) const override;
 
+	virtual bool CanJumpToDefinition() const override;
+	virtual void JumpToDefinition() const override;
+
 	void CreatePinsForFunction(const UFunction* InFunction);
 	
 	UFunction* GetTargetFunction() const;

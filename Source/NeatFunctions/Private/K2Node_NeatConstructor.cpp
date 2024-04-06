@@ -7,7 +7,6 @@
 #include "BlueprintCompilationManager.h"
 #include "BlueprintFunctionNodeSpawner.h"
 #include "K2Node_CallArrayFunction.h"
-#include "K2Node_EnumLiteral.h"
 #include "K2Node_IfThenElse.h"
 #include "KismetCompiler.h"
 #include "Kismet/GameplayStatics.h"
@@ -158,170 +157,6 @@ void UK2Node_NeatConstructor::AllocateDefaultPins()
 	CreatePinsForFunction(GetFinishFunction());
 }
 
-namespace
-{
-	// This is an exact copy of FKismetCompilerUtilities::GenerateAssignmentNodes, except that it has a UK2Node* Input instead of UK2Node_CallFunction*.
-	// It's really unfortunate, but necessary, since we have to insert an if node between our CallFunction node and our assignment nodes.
-	UEdGraphPin* GenerateAssignmentNodes(class FKismetCompilerContext& CompilerContext, UEdGraph* SourceGraph,
-	                                     UK2Node* CallBeginSpawnNode, UEdGraphNode* SpawnNode,
-	                                     UEdGraphPin* CallBeginResult, const UClass* ForClass)
-	{
-		static const FName ObjectParamName(TEXT("Object"));
-		static const FName ValueParamName(TEXT("Value"));
-		static const FName PropertyNameParamName(TEXT("PropertyName"));
-
-		const UEdGraphSchema_K2* Schema = CompilerContext.GetSchema();
-		UEdGraphPin* LastThen = CallBeginSpawnNode->GetThenPin();
-
-		// Create 'set var by name' nodes and hook them up
-		for (int32 PinIdx = 0; PinIdx < SpawnNode->Pins.Num(); PinIdx++)
-		{
-			// Only create 'set param by name' node if this pin is linked to something
-			UEdGraphPin* OrgPin = SpawnNode->Pins[PinIdx];
-			const bool bHasDefaultValue = !OrgPin->DefaultValue.IsEmpty() || !OrgPin->DefaultTextValue.IsEmpty() ||
-				OrgPin->DefaultObject;
-			if (NULL == CallBeginSpawnNode->FindPin(OrgPin->PinName) &&
-				(OrgPin->LinkedTo.Num() > 0 || bHasDefaultValue))
-			{
-				FProperty* Property = FindFProperty<FProperty>(ForClass, OrgPin->PinName);
-				// NULL property indicates that this pin was part of the original node, not the 
-				// class we're assigning to:
-				if (!Property)
-				{
-					continue;
-				}
-
-				if (OrgPin->LinkedTo.Num() == 0)
-				{
-					// We don't want to generate an assignment node unless the default value 
-					// differs from the value in the CDO:
-					FString DefaultValueAsString;
-
-					if (FBlueprintCompilationManager::GetDefaultValue(ForClass, Property, DefaultValueAsString))
-					{
-						if (Schema->DoesDefaultValueMatch(*OrgPin, DefaultValueAsString))
-						{
-							continue;
-						}
-					}
-					else if (ForClass->ClassDefaultObject)
-					{
-						FBlueprintEditorUtils::PropertyValueToString(Property, (uint8*)ForClass->ClassDefaultObject, DefaultValueAsString);
-
-						if (DefaultValueAsString == OrgPin->GetDefaultAsString())
-						{
-							continue;
-						}
-					}
-				}
-
-				const FString& SetFunctionName = Property->GetMetaData(FBlueprintMetadata::MD_PropertySetFunction);
-				if (!SetFunctionName.IsEmpty())
-				{
-					UClass* OwnerClass = Property->GetOwnerClass();
-					UFunction* SetFunction = OwnerClass->FindFunctionByName(*SetFunctionName);
-					check(SetFunction);
-
-					UK2Node_CallFunction* CallFuncNode = CompilerContext.SpawnIntermediateNode<UK2Node_CallFunction>(SpawnNode, SourceGraph);
-					CallFuncNode->SetFromFunction(SetFunction);
-					CallFuncNode->AllocateDefaultPins();
-
-					// Connect this node into the exec chain
-					Schema->TryCreateConnection(LastThen, CallFuncNode->GetExecPin());
-					LastThen = CallFuncNode->GetThenPin();
-
-					// Connect the new object to the 'object' pin
-					UEdGraphPin* ObjectPin = Schema->FindSelfPin(*CallFuncNode, EGPD_Input);
-					CallBeginResult->MakeLinkTo(ObjectPin);
-
-					// Move Value pin connections
-					UEdGraphPin* SetFunctionValuePin = nullptr;
-					for (UEdGraphPin* CallFuncPin : CallFuncNode->Pins)
-					{
-						if (!Schema->IsMetaPin(*CallFuncPin))
-						{
-							check(CallFuncPin->Direction == EGPD_Input);
-							SetFunctionValuePin = CallFuncPin;
-							break;
-						}
-					}
-					check(SetFunctionValuePin);
-
-					CompilerContext.MovePinLinksToIntermediate(*OrgPin, *SetFunctionValuePin);
-				}
-				else if (UFunction* SetByNameFunction = Schema->FindSetVariableByNameFunction(OrgPin->PinType))
-				{
-					UK2Node_CallFunction* SetVarNode = nullptr;
-					if (OrgPin->PinType.IsArray())
-					{
-						SetVarNode = CompilerContext.SpawnIntermediateNode<UK2Node_CallArrayFunction>(SpawnNode, SourceGraph);
-					}
-					else
-					{
-						SetVarNode = CompilerContext.SpawnIntermediateNode<UK2Node_CallFunction>(SpawnNode, SourceGraph);
-					}
-					SetVarNode->SetFromFunction(SetByNameFunction);
-					SetVarNode->AllocateDefaultPins();
-
-					// Connect this node into the exec chain
-					Schema->TryCreateConnection(LastThen, SetVarNode->GetExecPin());
-					LastThen = SetVarNode->GetThenPin();
-
-					// Connect the new object to the 'object' pin
-					UEdGraphPin* ObjectPin = SetVarNode->FindPinChecked(ObjectParamName);
-					CallBeginResult->MakeLinkTo(ObjectPin);
-
-					// Fill in literal for 'property name' pin - name of pin is property name
-					UEdGraphPin* PropertyNamePin = SetVarNode->FindPinChecked(PropertyNameParamName);
-					PropertyNamePin->DefaultValue = OrgPin->PinName.ToString();
-
-					UEdGraphPin* ValuePin = SetVarNode->FindPinChecked(ValueParamName);
-					if (OrgPin->LinkedTo.Num() == 0 &&
-						OrgPin->DefaultValue != FString() &&
-						OrgPin->PinType.PinCategory == UEdGraphSchema_K2::PC_Byte &&
-						OrgPin->PinType.PinSubCategoryObject.IsValid() &&
-						OrgPin->PinType.PinSubCategoryObject->IsA<UEnum>())
-					{
-						// Pin is an enum, we need to alias the enum value to an int:
-						UK2Node_EnumLiteral* EnumLiteralNode = CompilerContext.SpawnIntermediateNode<UK2Node_EnumLiteral>(SpawnNode, SourceGraph);
-						EnumLiteralNode->Enum = CastChecked<UEnum>(OrgPin->PinType.PinSubCategoryObject.Get());
-						EnumLiteralNode->AllocateDefaultPins();
-						EnumLiteralNode->FindPinChecked(UEdGraphSchema_K2::PN_ReturnValue)->MakeLinkTo(ValuePin);
-
-						UEdGraphPin* InPin = EnumLiteralNode->FindPinChecked(UK2Node_EnumLiteral::GetEnumInputPinName());
-						check(InPin);
-						InPin->DefaultValue = OrgPin->DefaultValue;
-					}
-					else
-					{
-						// For non-array struct pins that are not linked, transfer the pin type so that the node will expand an auto-ref that will assign the value by-ref.
-						if (OrgPin->PinType.IsArray() == false && OrgPin->PinType.PinCategory == UEdGraphSchema_K2::PC_Struct && OrgPin->LinkedTo.Num() == 0)
-						{
-							ValuePin->PinType.PinCategory = OrgPin->PinType.PinCategory;
-							ValuePin->PinType.PinSubCategory = OrgPin->PinType.PinSubCategory;
-							ValuePin->PinType.PinSubCategoryObject = OrgPin->PinType.PinSubCategoryObject;
-							CompilerContext.MovePinLinksToIntermediate(*OrgPin, *ValuePin);
-						}
-						else
-						{
-							// For interface pins we need to copy over the subcategory
-							if (OrgPin->PinType.PinCategory == UEdGraphSchema_K2::PC_Interface)
-							{
-								ValuePin->PinType.PinSubCategoryObject = OrgPin->PinType.PinSubCategoryObject;
-							}
-
-							CompilerContext.MovePinLinksToIntermediate(*OrgPin, *ValuePin);
-							SetVarNode->PinConnectionListChanged(ValuePin);
-						}
-					}
-				}
-			}
-		}
-
-		return LastThen;
-	}
-}
-
 void UK2Node_NeatConstructor::ExpandNode(FKismetCompilerContext& CompilerContext, UEdGraph* SourceGraph)
 {
 	Super::ExpandNode(CompilerContext, SourceGraph);
@@ -389,7 +224,11 @@ void UK2Node_NeatConstructor::ExpandNode(FKismetCompilerContext& CompilerContext
 		BeginSpawnFunc->GetReturnValuePin()->MakeLinkTo(FinishSpawnFunc->FindPin(InputName));
 	}
 
-	UEdGraphPin* LastThen = GenerateAssignmentNodes(CompilerContext, SourceGraph, IfElseNode, this, BeginSpawnFunc->GetReturnValuePin(), GetClassToSpawn());
+	// I hate this reinterpret_cast. I'm sorry for this.
+	// But GenerateAssignmentNodes has a very bad interface that forces it (or forces me to duplicate the entire function, which is quite large).
+	// In reality, this function only uses the UK2Node interface, but for some reason it takes a UK2Node_CallFunction* as input, limiting its use.
+	// While the reinterpret_cast is technically undefined behavior, I have not noticed any issues here.
+	UEdGraphPin* LastThen = FKismetCompilerUtilities::GenerateAssignmentNodes(CompilerContext, SourceGraph, reinterpret_cast<UK2Node_CallFunction*>(IfElseNode), this, BeginSpawnFunc->GetReturnValuePin(), GetClassToSpawn());
 
 	if (FinishSpawnFunc)
 	{
@@ -402,7 +241,7 @@ void UK2Node_NeatConstructor::ExpandNode(FKismetCompilerContext& CompilerContext
 
 UClass* UK2Node_NeatConstructor::GetClassPinBaseClass() const
 {
-	if (UFunction* Fn = GetTargetFunction())
+	if (const UFunction* Fn = GetTargetFunction())
 	{
 		const FClassProperty* ClassProp = CastField<FClassProperty>(Fn->FindPropertyByName(NAME_Class));
 		if (!ClassProp)
@@ -465,7 +304,7 @@ bool UK2Node_NeatConstructor::IsSpawnVarPin(UEdGraphPin* Pin) const
 
 FText UK2Node_NeatConstructor::GetBaseNodeTitle() const
 {
-	if (UFunction* Fn = GetTargetFunction())
+	if (const UFunction* Fn = GetTargetFunction())
 	{
 		return Fn->GetDisplayNameText();
 	}
@@ -474,7 +313,7 @@ FText UK2Node_NeatConstructor::GetBaseNodeTitle() const
 
 FText UK2Node_NeatConstructor::GetDefaultNodeTitle() const
 {
-	if (UFunction* Fn = GetTargetFunction())
+	if (const UFunction* Fn = GetTargetFunction())
 	{
 		return FText::Format(INVTEXT("{0}\nNo Class Selected"), Fn->GetDisplayNameText());
 	}
@@ -483,9 +322,12 @@ FText UK2Node_NeatConstructor::GetDefaultNodeTitle() const
 
 FText UK2Node_NeatConstructor::GetNodeTitleFormat() const
 {
-	if (UFunction* Fn = GetTargetFunction())
+	if (const UFunction* Fn = GetTargetFunction())
 	{
-		return FText::Format(INVTEXT("{0}\n{ClassName}"), Fn->GetDisplayNameText());
+		FTextBuilder Builder;
+		Builder.AppendLine(Fn->GetDisplayNameText());
+		Builder.AppendLine(INVTEXT("{ClassName}"));
+		return Builder.ToText();
 	}
 	return Super::GetNodeTitleFormat();
 }
@@ -518,6 +360,35 @@ void UK2Node_NeatConstructor::EarlyValidation(FCompilerResultsLog& MessageLog) c
 		MessageLog.Error(TEXT("Must specify a class in @@"), this);
 	else if (ClassToSpawn->HasAnyClassFlags(CLASS_Abstract))
 		MessageLog.Error(TEXT("Cannot construct an abstract object of type '@@' in @@"), *GetNameSafe(ClassToSpawn), this);
+}
+
+namespace
+{
+	// Avoid writing a bunch of duplicated code by maintaining CallFunction nodes for our functions that we can delegate work to.
+	TMap<TWeakObjectPtr<UFunction>, TStrongObjectPtr<UK2Node_CallFunction>> HelperLUT;
+	const UK2Node_CallFunction& GetHelperCallFunctionNode(UFunction* InFunction)
+	{
+		if (const TStrongObjectPtr<UK2Node_CallFunction>* Node = HelperLUT.Find(InFunction))
+		{
+			check(Node->IsValid());
+			return *Node->Get();
+		}
+
+		UK2Node_CallFunction* NewNode = NewObject<UK2Node_CallFunction>();
+		NewNode->FunctionReference.SetFromField<UFunction>(InFunction, false);
+		HelperLUT.Add(InFunction, TStrongObjectPtr(NewNode));
+		return *NewNode;
+	}
+}
+
+bool UK2Node_NeatConstructor::CanJumpToDefinition() const
+{
+	return GetHelperCallFunctionNode(GetTargetFunction()).CanJumpToDefinition();
+}
+
+void UK2Node_NeatConstructor::JumpToDefinition() const
+{
+	GetHelperCallFunctionNode(GetTargetFunction()).JumpToDefinition();
 }
 
 void UK2Node_NeatConstructor::CreatePinsForFunction(const UFunction* InFunction)
@@ -608,7 +479,7 @@ void UK2Node_NeatConstructor::CreatePinsForFunction(const UFunction* InFunction)
 		bAllPinsGood = bAllPinsGood && bPinGood;
 	}
 
-	// Since we're not a CallFunction node, WorldContext pins get asset pickers. 
+	// Since we're not a CallFunction node, WorldContext pins get asset pickers. Remove it!
 	if (const FString* WorldContext = InFunction->FindMetaData(FBlueprintMetadata::MD_WorldContext))
 	{
 		if (UEdGraphPin* Pin = FindPin(FName(*WorldContext), EGPD_Input))
@@ -620,7 +491,6 @@ UFunction* UK2Node_NeatConstructor::GetTargetFunction() const
 {
 	if (!FBlueprintCompilationManager::IsGeneratedClassLayoutReady())
 	{
-		// first look in the skeleton class:
 		if (UFunction* SkeletonFn = GetTargetFunctionFromSkeletonClass())
 		{
 			return SkeletonFn;
@@ -634,9 +504,9 @@ UFunction* UK2Node_NeatConstructor::GetTargetFunction() const
 UFunction* UK2Node_NeatConstructor::GetTargetFunctionFromSkeletonClass() const
 {
 	UFunction* TargetFunction = nullptr;
-	UClass* ParentClass = FunctionReference.GetMemberParentClass(GetBlueprintClassFromNode());
-	UBlueprint* OwningBP = ParentClass ? Cast<UBlueprint>(ParentClass->ClassGeneratedBy) : nullptr;
-	if (UClass* SkeletonClass = OwningBP ? OwningBP->SkeletonGeneratedClass : nullptr)
+	const UClass* ParentClass = FunctionReference.GetMemberParentClass(GetBlueprintClassFromNode());
+	const UBlueprint* OwningBP = ParentClass ? Cast<UBlueprint>(ParentClass->ClassGeneratedBy) : nullptr;
+	if (const UClass* SkeletonClass = OwningBP ? OwningBP->SkeletonGeneratedClass : nullptr)
 	{
 		TargetFunction = SkeletonClass->FindFunctionByName(FunctionReference.GetMemberName());
 	}
