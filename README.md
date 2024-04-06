@@ -82,7 +82,13 @@ static UObject* CustomCreateObjectFunctionWithParameter(TSubclassOf<UObject> Cla
 ```
 
 ### With custom finish function
-In some cases (for a custom `UObject` subclass perhaps), you may want to call a custom "finish" function.
+In some cases (for a custom `UObject` subclass perhaps), you may want to call a custom "finish" function. This means the execution of the node is the following:
+1. Call the spawn function.
+2. Set all `ExposeOnSpawn` properties.
+3. Call the finish function.
+
+> [!NOTE]
+> For any `AActor` subclass, we automatically insert a default `FinishSpawning` node when using the `NeatConstructor` metadata. By using `NeatConstructorFinish`, you can override which function gets called for actors too.
 
 ![The node created by the functions below.](Documentation/Example_05.png)
 ```c++
