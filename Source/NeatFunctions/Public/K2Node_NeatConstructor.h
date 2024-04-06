@@ -38,7 +38,7 @@ public:
 
 	virtual FSlateIcon GetIconAndTint(FLinearColor& OutColor) const override;
 	
-	virtual void EarlyValidation(FCompilerResultsLog& MessageLog) const override;
+	virtual void ValidateNodeDuringCompilation(FCompilerResultsLog& MessageLog) const override;
 
 	virtual bool CanJumpToDefinition() const override;
 	virtual void JumpToDefinition() const override;

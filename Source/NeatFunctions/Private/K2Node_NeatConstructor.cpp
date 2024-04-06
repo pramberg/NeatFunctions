@@ -351,9 +351,9 @@ FSlateIcon UK2Node_NeatConstructor::GetIconAndTint(FLinearColor& OutColor) const
 	return FSlateIconFinder::FindIconForClass(GetClassPinBaseClass());
 }
 
-void UK2Node_NeatConstructor::EarlyValidation(FCompilerResultsLog& MessageLog) const
+void UK2Node_NeatConstructor::ValidateNodeDuringCompilation(FCompilerResultsLog& MessageLog) const
 {
-	Super::EarlyValidation(MessageLog);
+	Super::ValidateNodeDuringCompilation(MessageLog);
 	
 	const UClass* ClassToSpawn = GetClassToSpawn();
 	if (!ClassToSpawn)
