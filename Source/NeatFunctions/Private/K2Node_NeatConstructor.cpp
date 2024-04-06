@@ -362,6 +362,16 @@ void UK2Node_NeatConstructor::ValidateNodeDuringCompilation(FCompilerResultsLog&
 		MessageLog.Error(TEXT("Cannot construct an abstract object of type '@@' in @@"), *GetNameSafe(ClassToSpawn), this);
 }
 
+void UK2Node_NeatConstructor::EarlyValidation(FCompilerResultsLog& MessageLog) const
+{
+	Super::EarlyValidation(MessageLog);
+
+	if (!GetTargetFunction())
+	{
+		MessageLog.Error(TEXT("@@ references function \"@@\" that has been removed from class @@"), this, *FunctionReference.GetMemberName().ToString(), FunctionReference.GetMemberParentClass());
+	}
+}
+
 namespace
 {
 	// Avoid writing a bunch of duplicated code by maintaining CallFunction nodes for our functions that we can delegate work to.
@@ -516,7 +526,10 @@ UFunction* UK2Node_NeatConstructor::GetTargetFunctionFromSkeletonClass() const
 UFunction* UK2Node_NeatConstructor::GetFinishFunction() const
 {
 	const UFunction* TargetFunc = GetTargetFunction();
-	const FString* FinishFuncName = TargetFunc ? TargetFunc->FindMetaData(NeatConstructorFinishMetadataName) : nullptr;
+	if (!TargetFunc)
+		return nullptr;
+	
+	const FString* FinishFuncName = TargetFunc->FindMetaData(NeatConstructorFinishMetadataName);
 	if (UFunction* FinishFunc = FinishFuncName ? TargetFunc->GetOwnerClass()->FindFunctionByName(FName(*FinishFuncName)) : nullptr)
 		return FinishFunc;
 
