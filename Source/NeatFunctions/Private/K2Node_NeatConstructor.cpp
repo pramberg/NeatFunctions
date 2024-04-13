@@ -161,6 +161,16 @@ void UK2Node_NeatConstructor::ExpandNode(FKismetCompilerContext& CompilerContext
 {
 	Super::ExpandNode(CompilerContext, SourceGraph);
 
+	const UEdGraphPin* SpawnClassPin = GetClassPin();
+	const UClass* SpawnClass = SpawnClassPin ? Cast<UClass>(SpawnClassPin->DefaultObject) : nullptr;
+	if (!SpawnClassPin || ((!SpawnClass) && (SpawnClassPin->LinkedTo.Num() == 0)))
+	{
+		CompilerContext.MessageLog.Error(TEXT("@@ must have a class specified"), this);
+		// we break exec links so this is the only error we get, don't want this node being considered and giving 'unexpected node' type warnings
+		BreakAllNodeLinks();
+		return;
+	}
+	
 	UK2Node_CallFunction* BeginSpawnFunc = CompilerContext.SpawnIntermediateNode<UK2Node_CallFunction>(this, SourceGraph);
 	BeginSpawnFunc->SetFromFunction(GetTargetFunction());
 	BeginSpawnFunc->AllocateDefaultPins();
@@ -349,17 +359,6 @@ FText UK2Node_NeatConstructor::GetMenuCategory() const
 FSlateIcon UK2Node_NeatConstructor::GetIconAndTint(FLinearColor& OutColor) const
 {
 	return FSlateIconFinder::FindIconForClass(GetClassPinBaseClass());
-}
-
-void UK2Node_NeatConstructor::ValidateNodeDuringCompilation(FCompilerResultsLog& MessageLog) const
-{
-	Super::ValidateNodeDuringCompilation(MessageLog);
-	
-	const UClass* ClassToSpawn = GetClassToSpawn();
-	if (!ClassToSpawn)
-		MessageLog.Error(TEXT("Must specify a class in @@"), this);
-	else if (ClassToSpawn->HasAnyClassFlags(CLASS_Abstract))
-		MessageLog.Error(TEXT("Cannot construct an abstract object of type '@@' in @@"), *GetNameSafe(ClassToSpawn), this);
 }
 
 void UK2Node_NeatConstructor::EarlyValidation(FCompilerResultsLog& MessageLog) const

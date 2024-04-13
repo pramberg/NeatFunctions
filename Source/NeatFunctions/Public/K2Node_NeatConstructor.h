@@ -39,7 +39,6 @@ public:
 	virtual FSlateIcon GetIconAndTint(FLinearColor& OutColor) const override;
 
 	// Validation
-	virtual void ValidateNodeDuringCompilation(FCompilerResultsLog& MessageLog) const override;
 	virtual void EarlyValidation(FCompilerResultsLog& MessageLog) const override;
 
 	// Interaction
