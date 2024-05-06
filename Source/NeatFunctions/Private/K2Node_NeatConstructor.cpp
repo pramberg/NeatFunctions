@@ -170,6 +170,9 @@ void UK2Node_NeatConstructor::ExpandNode(FKismetCompilerContext& CompilerContext
 		BreakAllNodeLinks();
 		return;
 	}
+
+	// A few lines down we move the class pin, so cache off the ClassToSpawn before doing that.
+	const UClass* ClassToSpawn = GetClassToSpawn();
 	
 	UK2Node_CallFunction* BeginSpawnFunc = CompilerContext.SpawnIntermediateNode<UK2Node_CallFunction>(this, SourceGraph);
 	BeginSpawnFunc->SetFromFunction(GetTargetFunction());
@@ -238,7 +241,7 @@ void UK2Node_NeatConstructor::ExpandNode(FKismetCompilerContext& CompilerContext
 	// But GenerateAssignmentNodes has a very bad interface that forces it (or forces me to duplicate the entire function, which is quite large).
 	// In reality, this function only uses the UK2Node interface, but for some reason it takes a UK2Node_CallFunction* as input, limiting its use.
 	// While the reinterpret_cast is technically undefined behavior, I have not noticed any issues here.
-	UEdGraphPin* LastThen = FKismetCompilerUtilities::GenerateAssignmentNodes(CompilerContext, SourceGraph, reinterpret_cast<UK2Node_CallFunction*>(IfElseNode), this, BeginSpawnFunc->GetReturnValuePin(), GetClassToSpawn());
+	UEdGraphPin* LastThen = FKismetCompilerUtilities::GenerateAssignmentNodes(CompilerContext, SourceGraph, reinterpret_cast<UK2Node_CallFunction*>(IfElseNode), this, BeginSpawnFunc->GetReturnValuePin(), ClassToSpawn);
 
 	if (FinishSpawnFunc)
 	{
