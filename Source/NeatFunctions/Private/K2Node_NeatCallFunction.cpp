@@ -96,16 +96,32 @@ void UK2Node_NeatCallFunction::ExpandNode(FKismetCompilerContext& CompilerContex
 	CallFunc->AllocateDefaultPins();
 
 	bool bIsValid = true;
-	// Move all pins except for delegates we've created.
-	for (UEdGraphPin* Pin : CallFunc->Pins)
+
+	const auto MovePinLinksForDirection = [&](EEdGraphPinDirection Direction)
 	{
-		if (UEdGraphPin* PinOnSelf = FindPin(Pin->GetFName()))
+		for (UEdGraphPin* Pin : CallFunc->Pins)
 		{
-			// We have created exec pins with the same name as the delegate property on the CallFunction. Skip those, we handle those in the next step.
-			if (Pin->PinType == PinOnSelf->PinType && Pin->Direction == PinOnSelf->Direction)
-				bIsValid &= CompilerContext.MovePinLinksToIntermediate(*PinOnSelf, *Pin).CanSafeConnect();
+			if (Pin->Direction != Direction)
+				continue;
+
+			if (UEdGraphPin* PinOnSelf = FindPin(Pin->GetFName()))
+			{
+				// We have created exec pins with the same name as the delegate property on the CallFunction. Skip those, we handle those in the next step.
+				if (Pin->PinType == PinOnSelf->PinType && Pin->Direction == PinOnSelf->Direction)
+				{
+					bIsValid &= CompilerContext.MovePinLinksToIntermediate(*PinOnSelf, *Pin).CanSafeConnect();
+					// Conforms output type in case DeterminesOutputType is used.
+					CallFunc->NotifyPinConnectionListChanged(Pin);
+				}
+			}
 		}
-	}
+	};
+	
+	// Move all pins except for delegates we've created.
+	// Start with all input pins, to ensure DeterminesOutputType class pins have propagated to output pins.
+	// Those could in theory be out params created before the class pin, I think.
+	MovePinLinksForDirection(EGPD_Input);
+	MovePinLinksForDirection(EGPD_Output);
 
 	ForEachEligableDelegateProperty([&](const FDelegateProperty& Prop)
 	{
