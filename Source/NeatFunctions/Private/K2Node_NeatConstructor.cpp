@@ -187,11 +187,20 @@ void UK2Node_NeatConstructor::ExpandNode(FKismetCompilerContext& CompilerContext
 
 	for (UEdGraphPin* CurrentPin : Pins)
 	{
-		if (CurrentPin && CurrentPin->Direction == EGPD_Input && CurrentPin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
+		if (CurrentPin && CurrentPin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
 		{
 			if (UEdGraphPin* DestPin = BeginSpawnFunc->FindPin(CurrentPin->PinName))
 			{
-				CompilerContext.CopyPinLinksToIntermediate(*CurrentPin, *DestPin);
+				// If we're an input, it's technically possible for it to be an input to both the spawn node and the finish node.
+				// So don't move inputs, copy them instead.
+				if (CurrentPin->Direction == EGPD_Input)
+				{
+					CompilerContext.CopyPinLinksToIntermediate(*CurrentPin, *DestPin);
+				}
+				else
+				{
+					CompilerContext.MovePinLinksToIntermediate(*CurrentPin, *DestPin);
+				}
 			}
 		}
 	}
@@ -224,11 +233,18 @@ void UK2Node_NeatConstructor::ExpandNode(FKismetCompilerContext& CompilerContext
 
 		for (UEdGraphPin* CurrentPin : Pins)
 		{
-			if (CurrentPin && CurrentPin->Direction == EGPD_Input && CurrentPin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
+			if (CurrentPin && CurrentPin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
 			{
 				if (UEdGraphPin* DestPin = FinishSpawnFunc->FindPin(CurrentPin->PinName))
 				{
-					CompilerContext.CopyPinLinksToIntermediate(*CurrentPin, *DestPin);
+					if (CurrentPin->Direction == EGPD_Input)
+					{
+						CompilerContext.CopyPinLinksToIntermediate(*CurrentPin, *DestPin);
+					}
+					else
+					{
+						CompilerContext.MovePinLinksToIntermediate(*CurrentPin, *DestPin);
+					}
 				}
 			}
 		}
