@@ -144,14 +144,17 @@ void UK2Node_NeatConstructor::GetMenuActions(FBlueprintActionDatabaseRegistrar& 
 void UK2Node_NeatConstructor::AllocateDefaultPins()
 {
 	Super::AllocateDefaultPins();
-	
-	FCreatePinParams Params;
-	Params.Index = GetPinIndex(GetThenPin()) + 1;
-	UEdGraphPin* ThenIsNotValid = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Exec, UEdGraphSchema_K2::PN_Else, Params);
-	ThenIsNotValid->PinFriendlyName = INVTEXT("Not Valid");
-	ThenIsNotValid->PinToolTip = TEXT("Executed when there wasn't an object spawned successfully.");
-	GetThenPin()->PinFriendlyName = INVTEXT("Valid");
-	GetThenPin()->PinToolTip = TEXT("Executed when we spawned an object successfully.");
+
+	if (GetTargetFunction()->HasMetaData(NeatObjectValidationMetadataName))
+	{
+		FCreatePinParams Params;
+		Params.Index = GetPinIndex(GetThenPin()) + 1;
+		UEdGraphPin* ThenIsNotValid = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Exec, UEdGraphSchema_K2::PN_Else, Params);
+		ThenIsNotValid->PinFriendlyName = INVTEXT("Not Valid");
+		ThenIsNotValid->PinToolTip = TEXT("Executed when there wasn't an object spawned successfully.");
+		GetThenPin()->PinFriendlyName = INVTEXT("Valid");
+		GetThenPin()->PinToolTip = TEXT("Executed when we spawned an object successfully.");
+	}
 
 	CreatePinsForFunction(GetTargetFunction());
 	CreatePinsForFunction(GetFinishFunction());
@@ -173,6 +176,7 @@ void UK2Node_NeatConstructor::ExpandNode(FKismetCompilerContext& CompilerContext
 
 	// A few lines down we move the class pin, so cache off the ClassToSpawn before doing that.
 	const UClass* ClassToSpawn = GetClassToSpawn();
+
 	
 	UK2Node_CallFunction* BeginSpawnFunc = CompilerContext.SpawnIntermediateNode<UK2Node_CallFunction>(this, SourceGraph);
 	BeginSpawnFunc->SetFromFunction(GetTargetFunction());
@@ -205,32 +209,14 @@ void UK2Node_NeatConstructor::ExpandNode(FKismetCompilerContext& CompilerContext
 		}
 	}
 
-	UK2Node_CallFunction* IsValidFuncNode = CompilerContext.SpawnIntermediateNode<UK2Node_CallFunction>(this, SourceGraph);
-	const FName IsValidFuncName = GET_FUNCTION_NAME_CHECKED(UKismetSystemLibrary, IsValid);
-	IsValidFuncNode->FunctionReference.SetExternalMember(IsValidFuncName, UKismetSystemLibrary::StaticClass());
-	IsValidFuncNode->AllocateDefaultPins();
-	UEdGraphPin* IsValidInputPin = IsValidFuncNode->FindPinChecked(TEXT("Object"));
+	UEdGraphPin* LastThen = FKismetCompilerUtilities::GenerateAssignmentNodes(CompilerContext, SourceGraph, BeginSpawnFunc, this, BeginSpawnFunc->GetReturnValuePin(), ClassToSpawn);
 
-	const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
-	Schema->TryCreateConnection(BeginSpawnFunc->GetReturnValuePin(), IsValidInputPin);
-
-	UK2Node_IfThenElse* IfElseNode = CompilerContext.SpawnIntermediateNode<UK2Node_IfThenElse>(this, SourceGraph);
-	IfElseNode->AllocateDefaultPins();
-	Schema->TryCreateConnection(IsValidFuncNode->GetReturnValuePin(), IfElseNode->GetConditionPin());
-
-	Schema->TryCreateConnection(BeginSpawnFunc->GetThenPin(), IfElseNode->GetExecPin());
-
-	CompilerContext.CopyPinLinksToIntermediate(*FindPin(UEdGraphSchema_K2::PN_Else), *IfElseNode->GetElsePin());
-
-	UK2Node_CallFunction* FinishSpawnFunc = nullptr;
 	if (GetFinishFunction())
 	{
-		FinishSpawnFunc = CompilerContext.SpawnIntermediateNode<UK2Node_CallFunction>(this, SourceGraph);
+		UK2Node_CallFunction* FinishSpawnFunc = CompilerContext.SpawnIntermediateNode<UK2Node_CallFunction>(this, SourceGraph);
 		FinishSpawnFunc->SetFromFunction(GetFinishFunction());
 		FinishSpawnFunc->AllocateDefaultPins();
-
-		CompilerContext.MovePinLinksToIntermediate(*GetThenPin(), *FinishSpawnFunc->GetThenPin());
-
+		
 		for (UEdGraphPin* CurrentPin : Pins)
 		{
 			if (CurrentPin && CurrentPin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
@@ -251,18 +237,30 @@ void UK2Node_NeatConstructor::ExpandNode(FKismetCompilerContext& CompilerContext
 
 		const FName InputName = GetFinishFunctionObjectInputName();
 		BeginSpawnFunc->GetReturnValuePin()->MakeLinkTo(FinishSpawnFunc->FindPin(InputName));
-	}
-
-	// I hate this reinterpret_cast. I'm sorry for this.
-	// But GenerateAssignmentNodes has a very bad interface that forces it (or forces me to duplicate the entire function, which is quite large).
-	// In reality, this function only uses the UK2Node interface, but for some reason it takes a UK2Node_CallFunction* as input, limiting its use.
-	// While the reinterpret_cast is technically undefined behavior, I have not noticed any issues here.
-	UEdGraphPin* LastThen = FKismetCompilerUtilities::GenerateAssignmentNodes(CompilerContext, SourceGraph, reinterpret_cast<UK2Node_CallFunction*>(IfElseNode), this, BeginSpawnFunc->GetReturnValuePin(), ClassToSpawn);
-
-	if (FinishSpawnFunc)
-	{
+		
 		LastThen->MakeLinkTo(FinishSpawnFunc->GetExecPin());
 		LastThen = FinishSpawnFunc->GetThenPin();
+	}
+	
+	if (GetTargetFunction()->HasMetaData(NeatObjectValidationMetadataName))
+	{
+		UK2Node_CallFunction* IsValidFuncNode = CompilerContext.SpawnIntermediateNode<UK2Node_CallFunction>(this, SourceGraph);
+		const FName IsValidFuncName = GET_FUNCTION_NAME_CHECKED(UKismetSystemLibrary, IsValid);
+		IsValidFuncNode->FunctionReference.SetExternalMember(IsValidFuncName, UKismetSystemLibrary::StaticClass());
+		IsValidFuncNode->AllocateDefaultPins();
+		UEdGraphPin* IsValidInputPin = IsValidFuncNode->FindPinChecked(TEXT("Object"));
+
+		const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
+		Schema->TryCreateConnection(BeginSpawnFunc->GetReturnValuePin(), IsValidInputPin);
+
+		UK2Node_IfThenElse* IfElseNode = CompilerContext.SpawnIntermediateNode<UK2Node_IfThenElse>(this, SourceGraph);
+		IfElseNode->AllocateDefaultPins();
+		Schema->TryCreateConnection(IsValidFuncNode->GetReturnValuePin(), IfElseNode->GetConditionPin());
+		
+		CompilerContext.CopyPinLinksToIntermediate(*FindPin(UEdGraphSchema_K2::PN_Else), *IfElseNode->GetElsePin());
+		
+		LastThen->MakeLinkTo(IfElseNode->GetExecPin());
+		LastThen = IfElseNode->GetThenPin();
 	}
 
 	CompilerContext.MovePinLinksToIntermediate(*GetThenPin(), *LastThen);
