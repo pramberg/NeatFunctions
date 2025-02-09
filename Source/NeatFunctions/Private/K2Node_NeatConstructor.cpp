@@ -145,7 +145,7 @@ void UK2Node_NeatConstructor::AllocateDefaultPins()
 {
 	Super::AllocateDefaultPins();
 
-	if (GetTargetFunction()->HasMetaData(NeatObjectValidationMetadataName))
+	if (GetTargetFunction()->HasMetaData(NeatValidationMetadataName))
 	{
 		FCreatePinParams Params;
 		Params.Index = GetPinIndex(GetThenPin()) + 1;
@@ -242,7 +242,7 @@ void UK2Node_NeatConstructor::ExpandNode(FKismetCompilerContext& CompilerContext
 		LastThen = FinishSpawnFunc->GetThenPin();
 	}
 	
-	if (GetTargetFunction()->HasMetaData(NeatObjectValidationMetadataName))
+	if (GetTargetFunction()->HasMetaData(NeatValidationMetadataName))
 	{
 		UK2Node_CallFunction* IsValidFuncNode = CompilerContext.SpawnIntermediateNode<UK2Node_CallFunction>(this, SourceGraph);
 		const FName IsValidFuncName = GET_FUNCTION_NAME_CHECKED(UKismetSystemLibrary, IsValid);

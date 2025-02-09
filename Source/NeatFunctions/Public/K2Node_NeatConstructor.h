@@ -16,9 +16,9 @@ class NEATFUNCTIONS_API UK2Node_NeatConstructor : public UK2Node_ConstructObject
 	GENERATED_BODY()
 
 public:
-	static inline FLazyName NeatConstructorMetadataName {"NeatConstructor" };
-	static inline FLazyName NeatConstructorFinishMetadataName {"NeatConstructorFinish" };
-	static inline FLazyName NeatObjectValidationMetadataName {"NeatObjectValidation" };
+	static inline FLazyName NeatConstructorMetadataName { "NeatConstructor" };
+	static inline FLazyName NeatConstructorFinishMetadataName { "NeatConstructorFinish" };
+	static inline FLazyName NeatValidationMetadataName { "NeatValidation" };
 
 	// Logic
 	virtual void GetMenuActions(FBlueprintActionDatabaseRegistrar& ActionRegistrar) const override;
